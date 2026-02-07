@@ -1,29 +1,25 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { Case } from '../types';
 
-// Use a secure way to access key in real apps.
-// For this boilerplate, we assume environment variable or user input.
-const API_KEY = process.env.API_KEY || ''; 
-
 export const generateDailyCase = async (): Promise<Omit<Case, 'id' | 'createdAt'>> => {
-  if (!API_KEY) {
-    console.warn("No API Key found for Gemini. Using fallback mock data.");
-    return {
-      title: "The Case of the Missing API Key",
-      description: "The developer promised AI features but forgot to configure the environment variables. The users are suing for emotional distress.",
-      plaintiff: "The Users",
-      defendant: "The Dev"
-    };
-  }
-
-  const ai = new GoogleGenAI({ apiKey: API_KEY });
+  // Use process.env.API_KEY directly in the constructor as per guidelines
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: `Generate a fictional, funny, low-stakes court case for a social game called "Reddit Jury".
-      It needs a title, a short description (under 280 chars), a plaintiff name (e.g. /u/User), and a defendant name.
-      Keep it lighthearted and Reddit-culture relevant.`,
+      model: "gemini-3-flash-preview",
+      contents: `Generate a funny, dramatic Reddit court case for "Reddit Jury". 
+      Create 3 pieces of specific evidence:
+      1. Physical Evidence (e.g. A suspicious screenshot)
+      2. Witness Testimony (e.g. A neighbor's comment)
+      3. Character Note (e.g. The defendant's post history)
+      
+      Requirements:
+      - The evidence should be slightly contradictory or ambiguous.
+      - Theme: Reddit tropes (mods, karma, cake day, sub rules).
+      
+      Return as strictly JSON.`,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -32,24 +28,46 @@ export const generateDailyCase = async (): Promise<Omit<Case, 'id' | 'createdAt'
             title: { type: Type.STRING },
             description: { type: Type.STRING },
             plaintiff: { type: Type.STRING },
-            defendant: { type: Type.STRING }
+            defendant: { type: Type.STRING },
+            evidence: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  title: { type: Type.STRING },
+                  content: { type: Type.STRING }
+                },
+                required: ["title", "content"]
+              }
+            }
           },
-          required: ["title", "description", "plaintiff", "defendant"]
+          required: ["title", "description", "plaintiff", "defendant", "evidence"]
         }
       }
     });
 
-    if (response.text) {
-      return JSON.parse(response.text);
-    }
-    throw new Error("Empty response from AI");
-  } catch (error) {
-    console.error("Gemini generation failed", error);
+    // Access text property directly (not a method)
+    const data = JSON.parse(response.text);
     return {
-      title: "The Case of the AI Hallucination",
-      description: "The AI tried to generate a case but instead generated an error. The court is recessed.",
-      plaintiff: "System",
-      defendant: "Gemini"
+      ...data,
+      evidence: data.evidence.map((e: any, i: number) => ({
+        ...e,
+        id: `ev-${i}`,
+        isRevealed: false
+      }))
+    };
+  } catch (error) {
+    console.error("AI recess:", error);
+    return {
+      title: "The Case of the Missing Data",
+      description: "The AI is on strike. The judge is confused.",
+      plaintiff: "The Users",
+      defendant: "The Server",
+      evidence: [
+        { id: '1', title: 'Exhibit A', content: 'A blank sheet of paper.', isRevealed: false },
+        { id: '2', title: 'Testimony', content: 'I saw nothing.', isRevealed: false },
+        { id: '3', title: 'History', content: 'The logs are empty.', isRevealed: false }
+      ]
     };
   }
 };

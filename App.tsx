@@ -1,195 +1,212 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { Case, Verdict, GameState } from './types';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { Case, Verdict, Stance, GamePhase, UserProfile } from './types';
 import { devvitService } from './services/devvitService';
 import { CaseCard } from './components/CaseCard';
 import { VerdictList } from './components/VerdictList';
+import { DiscoveryPhase } from './components/DiscoveryPhase';
 import { GenerateButton } from './components/GenerateButton';
 import { CURRENT_USER } from './constants';
 
 export default function App() {
-  // State Management
-  const [gameState, setGameState] = useState<GameState>({
-    currentCase: null,
-    verdicts: [],
-    isLoading: true,
-    userHasSubmitted: false,
-    isLocked: false,
-  });
+  const [currentCase, setCurrentCase] = useState<Case | null>(null);
+  const [verdicts, setVerdicts] = useState<Verdict[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [phase, setPhase] = useState<GamePhase>('DISCOVERY');
   
+  const [profile, setProfile] = useState<UserProfile>({
+    username: CURRENT_USER.username,
+    xp: 0,
+    level: 1,
+    streak: 3, // Mock data
+    lastPlayed: ''
+  });
+
   const [inputText, setInputText] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [timeLeft, setTimeLeft] = useState<string>('');
+  const [selectedStance, setSelectedStance] = useState<Stance>('ESH');
+  const [timeLeft, setTimeLeft] = useState('');
 
-  // Initialization: Logic to load daily case
-  const init = useCallback(async () => {
-    setGameState(prev => ({ ...prev, isLoading: true }));
-    
-    // 1. Fetch Case
-    let todayCase = await devvitService.getTodayCase();
-    
-    // 2. Mock 24h Lock Logic
-    // In real Devvit, we might check post.createdAt vs now
-    const isLocked = false; // Simplified for demo; logic would check case.createdAt + 24h < now
-    
-    // 3. Fetch Verdicts if case exists
-    let verdicts: Verdict[] = [];
-    let userHasSubmitted = false;
+  const hasUserSubmitted = useMemo(() => 
+    verdicts.some(v => v.author === CURRENT_USER.username),
+    [verdicts]
+  );
 
-    if (todayCase) {
-      verdicts = await devvitService.getVerdictsForCase(todayCase.id);
-      userHasSubmitted = verdicts.some(v => v.author === CURRENT_USER.username);
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const dailyCase = await devvitService.getTodayCase();
+      if (dailyCase) {
+        setCurrentCase(dailyCase);
+        const list = await devvitService.getVerdictsForCase(dailyCase.id);
+        setVerdicts(list);
+        
+        // If user already submitted, skip to RESULT
+        const userHasVoted = list.some(v => v.author === CURRENT_USER.username);
+        if (userHasVoted) setPhase('RESULT');
+      }
+    } catch (err) {
+      console.error("Court error:", err);
+    } finally {
+      setLoading(false);
     }
-
-    setGameState({
-      currentCase: todayCase,
-      verdicts,
-      isLoading: false,
-      userHasSubmitted,
-      isLocked
-    });
   }, []);
 
   useEffect(() => {
-    init();
-  }, [init]);
-
-  // Countdown Timer Logic
-  useEffect(() => {
+    fetchData();
     const timer = setInterval(() => {
       const now = new Date();
-      // Calculate time until next UTC midnight (or case expiration)
       const tomorrow = new Date(now);
       tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
       tomorrow.setUTCHours(0, 0, 0, 0);
-      
       const diff = tomorrow.getTime() - now.getTime();
-      const hours = Math.floor(diff / (1000 * 60 * 60));
-      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-      setTimeLeft(`${hours}h ${minutes}m`);
-    }, 60000);
-    
+      const h = Math.floor(diff / 3600000);
+      const m = Math.floor((diff % 3600000) / 60000);
+      const s = Math.floor((diff % 60000) / 1000);
+      setTimeLeft(`${h}h ${m}m ${s}s`);
+    }, 1000);
     return () => clearInterval(timer);
-  }, []);
+  }, [fetchData]);
 
-  const handleCaseGenerated = (newCase: Case) => {
-    devvitService.createCase(newCase).then(() => {
-      init(); // Reload
+  const handleRevealEvidence = (id: string) => {
+    if (!currentCase) return;
+    setCurrentCase(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        evidence: prev.evidence.map(e => e.id === id ? { ...e, isRevealed: true } : e)
+      };
     });
+    // Add XP for investigating
+    setProfile(p => ({ ...p, xp: p.xp + 10 }));
   };
 
   const handleVerdictSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputText.trim() || !gameState.currentCase) return;
+    if (!inputText.trim() || !currentCase || hasUserSubmitted) return;
 
-    setIsSubmitting(true);
+    setSubmitting(true);
     const newVerdict: Verdict = {
-      id: Math.random().toString(36).substr(2, 9),
-      caseId: gameState.currentCase.id,
+      id: `v-${Date.now()}`,
+      caseId: currentCase.id,
       author: CURRENT_USER.username,
       text: inputText.trim(),
-      votes: 0
+      stance: selectedStance,
+      votes: 1
     };
 
     try {
       await devvitService.submitVerdict(newVerdict);
-      setGameState(prev => ({
-        ...prev,
-        verdicts: [newVerdict, ...prev.verdicts],
-        userHasSubmitted: true
-      }));
-      setInputText('');
+      setVerdicts(prev => [newVerdict, ...prev].sort((a,b) => b.votes - a.votes));
+      setPhase('RESULT');
+      setProfile(p => ({ ...p, xp: p.xp + 50, streak: p.streak + 1 }));
     } catch (err) {
-      alert("Error submitting verdict");
+      alert("Submission failed.");
     } finally {
-      setIsSubmitting(false);
+      setSubmitting(false);
     }
   };
 
-  const handleVote = (verdictId: string, newVotes: number) => {
-    setGameState(prev => ({
-      ...prev,
-      verdicts: prev.verdicts.map(v => 
-        v.id === verdictId ? { ...v, votes: newVotes } : v
-      ).sort((a, b) => b.votes - a.votes) // Keep sorted
-    }));
+  const handleVote = async (id: string) => {
+    setVerdicts(prev => prev.map(v => 
+      v.id === id ? { ...v, votes: v.votes + 1 } : v
+    ).sort((a,b) => b.votes - a.votes));
+    await devvitService.voteVerdict(id, CURRENT_USER.id, 1);
   };
 
-  if (gameState.isLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-reddit-dark text-white">
-        <div className="animate-pulse flex flex-col items-center">
-          <div className="h-12 w-12 bg-reddit-orange rounded-full mb-4"></div>
-          <div className="h-4 w-32 bg-gray-700 rounded"></div>
-        </div>
-      </div>
-    );
-  }
+  if (loading) return (
+    <div className="flex h-screen items-center justify-center bg-[#030303]">
+      <div className="w-12 h-12 border-2 border-reddit-orange border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-reddit-dark text-reddit-text relative max-w-md mx-auto shadow-2xl overflow-hidden flex flex-col">
-      {/* Header / Case Display */}
-      {gameState.currentCase ? (
-        <CaseCard dailyCase={gameState.currentCase} timeLeft={timeLeft} />
-      ) : (
-        <div className="p-8 text-center mt-10">
-          <h2 className="text-xl font-bold mb-2">Court is Adjourned</h2>
-          <p className="text-sm text-gray-400">No case currently in session.</p>
-          <GenerateButton onCaseGenerated={handleCaseGenerated} />
-        </div>
-      )}
-
-      {/* Main Content Area: Verdicts */}
-      <main className="flex-1 overflow-y-auto no-scrollbar p-3">
-        <VerdictList 
-          verdicts={gameState.verdicts} 
-          onVote={handleVote}
-          isLocked={gameState.isLocked}
-        />
-        
-        {/* Helper text if list is empty or short */}
-        {gameState.currentCase && gameState.verdicts.length < 3 && !gameState.userHasSubmitted && (
-            <div className="mt-8 text-center text-xs text-gray-500 px-8">
-                Be the first to sway the jury! Your verdict defines justice today.
-            </div>
-        )}
-      </main>
-
-      {/* Persistent Input Footer (Sticky) */}
-      {gameState.currentCase && !gameState.isLocked && !gameState.userHasSubmitted && (
-        <div className="p-3 bg-gray-900 border-t border-gray-800 sticky bottom-0 z-20">
-          <form onSubmit={handleVerdictSubmit} className="relative">
-            <input
-              type="text"
-              maxLength={140}
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              placeholder="Your verdict... (max 140 chars)"
-              className="w-full bg-gray-800 text-white rounded-full py-3 pl-4 pr-12 focus:outline-none focus:ring-2 focus:ring-reddit-orange text-sm placeholder-gray-500"
-              disabled={isSubmitting}
-            />
-            <button
-              type="submit"
-              disabled={!inputText.trim() || isSubmitting}
-              className="absolute right-1 top-1 bottom-1 bg-reddit-orange text-white rounded-full px-4 text-xs font-bold disabled:opacity-50 disabled:bg-gray-600 transition-all"
-            >
-              {isSubmitting ? '...' : 'RULE'}
-            </button>
-          </form>
-          <div className="text-[10px] text-gray-500 text-right mt-1 pr-2">
-            {inputText.length}/140
+    <div className="min-h-screen bg-[#030303] text-[#D7DADC] max-w-md mx-auto flex flex-col relative">
+      {currentCase ? (
+        <>
+          {/* Header Progress Bar */}
+          <div className="h-1 bg-gray-800 sticky top-0 z-50">
+             <div 
+               className="h-full bg-reddit-orange transition-all duration-500" 
+               style={{ width: phase === 'DISCOVERY' ? '33%' : phase === 'DELIBERATION' ? '66%' : '100%' }}
+             />
           </div>
-        </div>
-      )}
 
-      {/* Locked / Submitted State Footer */}
-      {gameState.currentCase && (gameState.isLocked || gameState.userHasSubmitted) && (
-        <div className="p-4 bg-gray-900 border-t border-gray-800 sticky bottom-0 z-20 text-center">
-          <p className="text-sm font-bold text-gray-400">
-            {gameState.isLocked ? 'Submissions Locked' : 'Verdict Submitted'}
-          </p>
-          <p className="text-xs text-gray-600">
-            {gameState.isLocked ? 'Return tomorrow for a new case.' : 'Vote on other verdicts while you wait.'}
-          </p>
+          <CaseCard dailyCase={currentCase} verdicts={verdicts} timeLeft={timeLeft} />
+          
+          <main className="flex-1 p-4 pb-32">
+            {phase === 'DISCOVERY' && (
+              <DiscoveryPhase 
+                evidence={currentCase.evidence} 
+                onReveal={handleRevealEvidence} 
+                onComplete={() => setPhase('DELIBERATION')}
+              />
+            )}
+
+            {phase === 'DELIBERATION' && (
+              <div className="animate-in fade-in duration-500">
+                <div className="bg-reddit-orange/10 border border-reddit-orange/20 p-4 rounded-xl mb-6">
+                  <span className="text-[10px] font-black text-reddit-orange uppercase">Phase 2: The Trial</span>
+                  <p className="text-sm text-gray-200 mt-1">Based on Exhibit A, B, and C—what is your final ruling, Juror {profile.username}?</p>
+                </div>
+                <VerdictList verdicts={verdicts} onVote={handleVote} isLocked={false} />
+              </div>
+            )}
+
+            {phase === 'RESULT' && (
+              <div className="space-y-6 animate-in zoom-in-95 duration-500">
+                <div className="bg-green-500/10 border border-green-500/20 p-6 rounded-2xl text-center">
+                   <div className="text-3xl mb-2">⚖️</div>
+                   <h3 className="text-lg font-black text-white">Your Verdict is in Recess</h3>
+                   <p className="text-xs text-gray-400 mt-1 uppercase tracking-tighter">Day {profile.streak} Streak • Level {profile.level}</p>
+                   <div className="mt-4 flex justify-center gap-2">
+                      <div className="bg-white/5 px-3 py-1 rounded text-[10px] font-bold">+{profile.xp} XP Gained</div>
+                   </div>
+                </div>
+                <VerdictList verdicts={verdicts} onVote={handleVote} isLocked={false} />
+              </div>
+            )}
+          </main>
+
+          {/* Submission UI - Fixed Footer */}
+          {phase === 'DELIBERATION' && !hasUserSubmitted && (
+            <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-[#1A1A1B] border-t border-[#343536] p-4 z-40">
+              <div className="flex justify-between gap-1 mb-3">
+                {(['GUILTY', 'ESH', 'INNOCENT'] as Stance[]).map(s => (
+                  <button
+                    key={s}
+                    onClick={() => setSelectedStance(s)}
+                    className={`flex-1 py-2 text-[9px] font-black rounded-md border transition-all ${
+                      selectedStance === s ? 'bg-reddit-orange border-reddit-orange text-white' : 'bg-transparent border-[#343536] text-gray-500'
+                    }`}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+              <form onSubmit={handleVerdictSubmit} className="flex gap-2">
+                <input
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  placeholder="Justify your stance..."
+                  className="flex-1 bg-[#272729] rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-reddit-orange outline-none"
+                  maxLength={140}
+                />
+                <button
+                  type="submit"
+                  disabled={!inputText.trim() || submitting}
+                  className="bg-reddit-orange text-white font-bold px-4 rounded-lg text-xs hover:brightness-110"
+                >
+                  {submitting ? '...' : 'RULE'}
+                </button>
+              </form>
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
+          <span className="text-5xl mb-4">🏛️</span>
+          <h2 className="text-xl font-black mb-2">No Active Case</h2>
+          <GenerateButton onCaseGenerated={(c) => devvitService.createCase(c as Case).then(fetchData)} />
         </div>
       )}
     </div>

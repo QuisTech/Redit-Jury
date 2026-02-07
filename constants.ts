@@ -1,29 +1,40 @@
+
 import { Case, Verdict } from './types';
 
 export const APP_ID = 'reddit-jury-app';
 
-// Mock User (In real Devvit, this comes from context.userId)
 export const CURRENT_USER = {
-  id: 't2_user123',
-  username: 'JudgeDredd_99'
+  id: 't2_dev_winner',
+  username: 'Judge_Reddit'
 };
 
-// Seed Data for initial load/demo
 export const SEED_CASES: Case[] = [
   {
-    id: '2023-10-27', // Old case (Locked)
-    title: 'The Case of the Stolen Sandwich',
-    description: 'The defendant admits to eating the sandwich but claims it was in the communal fridge without a name label. The plaintiff argues that a specialized artisanal bread implies ownership.',
-    plaintiff: '/u/HungryDev',
-    defendant: '/u/ThriftyIntern',
-    createdAt: Date.now() - 86400000 * 2 // 2 days ago
-  },
-  {
-    id: new Date().toISOString().split('T')[0], // Today's case
-    title: 'The Case of the Unmuted Mic',
-    description: 'During a serious all-hands meeting, the defendant was heard ordering a "Spicy McChicken" via drive-thru. They claim it brought joy to the meeting. HR disagrees.',
-    plaintiff: 'HR Dept',
-    defendant: '/u/RemoteWorker',
+    id: new Date().toISOString().split('T')[0],
+    title: 'The Case of the Accidental Permaban',
+    description: 'The defendant (a junior mod) accidentally banned the subreddits most popular artist because their dog stepped on the "Ban" key. The artist is suing for 1 million lost Karma.',
+    plaintiff: '/u/ArtisticLegend',
+    defendant: '/u/ClumsyMod',
+    evidence: [
+      { 
+        id: 'ev-seed-1', 
+        title: 'Exhibit A: The Keyboard', 
+        content: 'A high-resolution photo showing a single Golden Retriever hair wedged under the "Enter" key.', 
+        isRevealed: false 
+      },
+      { 
+        id: 'ev-seed-2', 
+        title: 'Witness Testimony', 
+        content: '"I heard a sharp bark, a frantic clicking sound, and then u/ClumsyMod sobbing loudly." - The Next Door Neighbor', 
+        isRevealed: false 
+      },
+      { 
+        id: 'ev-seed-3', 
+        title: 'Character Note', 
+        content: 'The defendant\'s profile shows they have been a member of r/GoodBoys for 8 years.', 
+        isRevealed: false 
+      }
+    ],
     createdAt: Date.now()
   }
 ];
@@ -31,23 +42,18 @@ export const SEED_CASES: Case[] = [
 export const SEED_VERDICTS: Verdict[] = [
   {
     id: 'v1',
-    caseId: '2023-10-27',
-    author: 'LawyerCat',
-    text: 'Possession is nine-tenths of the law. If it is unlabeled, it is public domain.',
-    votes: 45
+    caseId: SEED_CASES[0].id,
+    author: 'LegalBeagle',
+    stance: 'INNOCENT',
+    text: 'It was a "Paw-sitively" honest mistake. No intent to harm was established.',
+    votes: 42
   },
   {
     id: 'v2',
-    caseId: '2023-10-27',
-    author: 'EthicalEater',
-    text: 'Artisanal bread constitutes a clear marker of personal property. Guilty.',
-    votes: 32
-  },
-  {
-    id: 'v3',
-    caseId: new Date().toISOString().split('T')[0],
-    author: 'ZoomMaster',
-    text: 'A McChicken is a valid morale booster. Not guilty.',
-    votes: 12
+    caseId: SEED_CASES[0].id,
+    author: 'KarmaCop',
+    stance: 'GUILTY',
+    text: 'Gross negligence! A mods keyboard is a loaded weapon. 10 years of community service in /r/new.',
+    votes: 15
   }
 ];
